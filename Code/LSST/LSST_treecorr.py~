@@ -1,0 +1,88 @@
+import treecorr
+
+from random import *
+import math
+import numpy as np
+import astropy.table
+from matplotlib import pyplot as plt
+from astroML.datasets import fetch_sdss_specgals
+
+def randomcorr(dataset):
+    dx_range = np.max(dataset['dx']) - np.min(dataset['dx'])
+    dy_range = np.max(dataset['dy']) - np.min(dataset['dy'])
+    dx_min = np.min(dataset['dx'])
+    dy_min = np.min(dataset['dy'])
+
+    rand_dx = []
+    rand_dy = []
+
+
+    for i in range(len(dataset['dx'])):
+        rand_dx.append((random())*(dx_range) + dx_min)
+        rand_dy.append((random())*(dy_range) + dy_min)
+        
+    catrand = treecorr.Catalog(ra = rand_dx, dec = rand_dy, ra_units='arcsec', dec_units='arcsec')
+    
+    return catrand;
+
+def plotcorr(dataset1, dataset2, bin_centers, corr):
+    labels = ['$high_purity > .98$\n$N=%i$' % len(dataset1),
+          '$low_purity < .98$\n$N=%i$' % len(dataset2)]
+    
+    fig = plt.figure(figsize=(5, 2.5))
+    fig.subplots_adjust(bottom=0.2, top=0.9,
+                        left=0.13, right=0.95)
+
+    for i in range(2):
+        ax = fig.add_subplot(121 + i, xscale='log', yscale='log')
+
+        ax.set_ylim([10**(-3),10])
+        ax.set_xlim([10**(-2),10])
+
+        plt.scatter(math.e**(bin_centers[i]), corr[i][0])
+
+        t = np.array([0.01, 10])
+        ax.plot(t, 10 * (t / 0.01) ** -0.8, ':k', linewidth=1)
+
+        ax.text(0.95, 0.95, labels[i],
+                ha='right', va='top', transform=ax.transAxes)
+        ax.set_xlabel(r'$\theta\ (deg)$')
+        if i == 0:
+            ax.set_ylabel(r'$\hat{w}(\theta)$')
+
+def calccorr(dataset):
+    
+    nn = treecorr.NNCorrelation(nbins = 16, min_sep = 0.01, max_sep = 0.1, sep_units = 'deg') 
+    cat = treecorr.Catalog(ra = dataset['dx'], dec = dataset['dy'], ra_units='arcsec', dec_units='arcsec')
+    nn.process(cat)
+
+    catrand = randomcorr(dataset)
+    rr = treecorr.NNCorrelation(nbins = 16, min_sep = 0.01, max_sep = 0.1, sep_units = 'deg')
+    rr.process(catrand)
+    
+    dr = treecorr.NNCorrelation(nbins = 16, min_sep = 0.01, max_sep = 0.1, sep_units = 'deg')
+    dr.process(cat, catrand)
+
+    corr = nn.calculateXi(rr, dr)
+    
+    bin_centers = nn.meanlogr
+    return [corr, bin_centers]
+
+def producecorrplots(path, purity, red1 = 0, red2 = 0):
+    data = astropy.table.Table.read(path)
+    
+    if(red1 != 0 and red1 != 0):
+        data = data[data['redshift']>red1]
+        data = data[data['redshift']< red2]
+    
+    low_purity = data[np.where(data['purity']<purity)[0]]
+    high_purity = data[np.where(data['purity']>purity)[0]]
+
+    calc_low = calccorr(low_purity)
+    calc_high = calccorr(high_purity)
+
+    corr = [calc_low[0], calc_high[0]]
+    bin_centers = [calc_low[1], calc_high[1]]
+
+    plotcorr(low_purity, high_purity, bin_centers, corr)
+
